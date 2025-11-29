@@ -16,42 +16,50 @@ else:
 
 st.set_page_config(page_title="eBay Video Lister", page_icon="🎥")
 
-# --- HELPER: SMART FRAME HUNTER ---
-def get_sharpest_frame(video_path, timestamp_str):
+# --- HELPER: GET 3 CANDIDATE FRAMES ---
+def get_burst_frames(video_path, timestamp_str):
+    """
+    Returns a list of 3 images: 
+    1. 1 second BEFORE the timestamp
+    2. EXACT timestamp
+    3. 1 second AFTER the timestamp
+    """
     try:
         minutes, seconds = map(int, timestamp_str.split(':'))
         center_time = (minutes * 60) + seconds
         
         cap = cv2.VideoCapture(video_path)
-        best_score = 0
-        best_frame = None
-        offsets = [0, -0.5, 0.5] 
+        if not cap.isOpened(): return []
+        
+        frames = []
+        # Check -0.5s, 0.0s, +0.5s
+        offsets = [-0.6, 0.0, 0.6] 
         
         for offset in offsets:
             target_time = center_time + offset
             if target_time < 0: continue
+            
             cap.set(cv2.CAP_PROP_POS_MSEC, target_time * 1000)
             ret, frame = cap.read()
+            
             if ret:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                score = cv2.Laplacian(gray, cv2.CV_64F).var()
-                if score > best_score:
-                    best_score = score
-                    best_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # Convert to RGB
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(rgb_frame)
         
         cap.release()
-        return best_frame
+        return frames
     except:
-        return None
+        return []
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Settings")
     currency = st.selectbox("Currency", ["£ (GBP)", "$ (USD)", "€ (EUR)", "¥ (JPY)"])
-    st.info("Mode: Universal Reseller (High Precision)")
+    st.info("Mode: Burst Capture (Select Best)")
 
 st.title("🎥 eBay Video Auto-Lister")
-st.write(f"Upload a video of ANY item. We'll list it in {currency}.")
+st.write(f"Upload a video. We'll find the best shots.")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
@@ -62,7 +70,7 @@ if uploaded_file:
     st.video(uploaded_file)
     
     if st.button("✨ Analyze Video"):
-        with st.spinner("Reading tags, labels & defects..."):
+        with st.spinner("Analyzing & Taking Burst Photos..."):
             try:
                 # UPLOAD
                 video_file = genai.upload_file(path="temp_video.mp4")
@@ -82,35 +90,26 @@ if uploaded_file:
                     top_k=40
                 )
 
-                # --- UNIVERSAL PROMPT ---
-                # This works for Shoes, Tech, Tools, Clothes, etc.
                 prompt = f"""
-                Act as an expert eBay Power Seller for ALL categories (Electronics, Clothing, Collectibles).
+                Act as an expert eBay Seller.
                 
-                STEP 1: EVIDENCE GATHERING (The "Sherlock" Phase)
-                - Read ANY text labels, tags, or stickers visible.
-                - Look for Model Numbers (e.g., on the bottom of a drill, inside a shoe tongue, or back of a camera).
-                - Identify materials (Leather, Plastic, Metal) and Brand Logos.
+                STEP 1: EVIDENCE & ID
+                - Read ALL text/tags/labels.
+                - Identify Brand, Model, Size, Material.
                 
-                STEP 2: IDENTIFICATION
-                - Use the evidence to name the EXACT item.
-                - If it's clothing, find the Size Tag.
-                - If it's electronics, find the Model Number.
-                
-                STEP 3: PRICING
-                - Give a target price in {currency} based on the condition seen.
+                STEP 2: PRICING
+                - Give a target price in {currency} based on condition.
                 
                 OUTPUT JSON ONLY:
                 {{
-                    "evidence_found": "e.g. Found 'Size 9' on tongue, 'Gore-Tex' label...",
-                    "title": "SEO Title (Brand + Model + Key Specs)",
+                    "title": "SEO Title",
                     "target_price": "{currency}XXX",
-                    "condition": "Specific condition notes (scratches, stains, wear)",
-                    "description": "Professional sales description",
+                    "condition": "Condition notes",
+                    "description": "Sales description",
                     "shots": {{
-                        "Main": "00:00 (Best full view)",
-                        "Label/Tag": "00:00 (The crucial ID tag)",
-                        "Defect/Detail": "00:00 (Close up of wear or features)"
+                        "Main View": "00:00 (Full item visible)",
+                        "Label/Text": "00:00 (Close up of text)",
+                        "Flaws/Detail": "00:00 (Any damage or feature)"
                     }}
                 }}
                 """
@@ -125,28 +124,34 @@ if uploaded_file:
                 if match:
                     data = json.loads(match.group(0))
 
-                    # DISPLAY
+                    # DISPLAY LISTING
                     st.header(data.get("title"))
-                    
                     col1, col2 = st.columns(2)
                     col1.metric("Target Price", data.get("target_price"))
-                    col2.caption(f"🔎 Evidence: {data.get('evidence_found')}")
-                    
-                    st.success(f"**Condition:** {data.get('condition')}")
+                    col2.success(f"Condition: {data.get('condition')}")
                     st.write(data.get("description"))
                     
                     st.markdown("---")
-                    st.subheader("📸 Proof of Item")
+                    st.subheader("📸 Select The Best Shot")
+                    st.caption("We took 3 photos for each moment. Pick the one with the best angle.")
                     
-                    cols = st.columns(3)
-                    idx = 0
+                    # LOOP THROUGH SHOTS
                     for shot_name, time_str in data.get("shots", {}).items():
                         if time_str and time_str != "null":
-                            photo = get_sharpest_frame("temp_video.mp4", time_str)
-                            if photo is not None:
-                                with cols[idx % 3]:
-                                    st.image(photo, caption=f"{shot_name}", use_container_width=True)
-                                    idx += 1
+                            st.write(f"### 🎞️ {shot_name} (around {time_str})")
+                            
+                            # GET BURST (3 photos)
+                            burst_photos = get_burst_frames("temp_video.mp4", time_str)
+                            
+                            if burst_photos:
+                                c1, c2, c3 = st.columns(3)
+                                # Display them side by side
+                                if len(burst_photos) > 0: c1.image(burst_photos[0], caption="Early", use_container_width=True)
+                                if len(burst_photos) > 1: c2.image(burst_photos[1], caption="Exact", use_container_width=True)
+                                if len(burst_photos) > 2: c3.image(burst_photos[2], caption="Late", use_container_width=True)
+                            else:
+                                st.warning("Could not extract frames.")
+
                 else:
                     st.error("AI Error")
                     st.write(response.text)
