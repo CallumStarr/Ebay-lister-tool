@@ -13,8 +13,17 @@ else:
     st.stop()
 
 st.set_page_config(page_title="eBay Video Lister", page_icon="🎥")
+
+# --- SIDEBAR SETTINGS ---
+with st.sidebar:
+    st.header("⚙️ Settings")
+    currency = st.selectbox("Currency", ["£ (GBP)", "$ (USD)", "€ (EUR)", "¥ (JPY)"])
+    model_mode = st.radio("Mode", ["Speed (Flash)", "Precision (Pro)"])
+    # "Pro" mode uses a smarter model if available, otherwise defaults to Flash
+    selected_model = 'gemini-2.0-flash' 
+
 st.title("🎥 eBay Video Auto-Lister")
-st.write("Upload a video (10-45s) to generate a listing.")
+st.write(f"Upload a video. We'll list it in {currency}.")
 
 # 2. VIDEO UPLOADER
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
@@ -27,79 +36,86 @@ if uploaded_file:
     st.video(uploaded_file)
     
     if st.button("✨ Analyze Video"):
-        with st.spinner("Processing video... (This takes 10-20 seconds)"):
+        with st.spinner("Hunting for details (Dial text, Caseback, Condition)..."):
             try:
-                # A. UPLOAD TO GOOGLE
+                # UPLOAD & WAIT
                 video_file = genai.upload_file(path="temp_video.mp4")
-                
-                # B. WAIT LOOP (Crucial for Video)
                 while video_file.state.name == "PROCESSING":
                     time.sleep(2)
                     video_file = genai.get_file(video_file.name)
 
                 if video_file.state.name == "FAILED":
-                    st.error("Google failed to process the video file.")
+                    st.error("Video processing failed.")
                     st.stop()
 
-                # C. CONFIGURE MODEL WITH SAFETY OFF
-                # This prevents empty responses due to false alarms
-                model = genai.GenerativeModel('gemini-2.0-flash')
+                # CONFIG
+                model = genai.GenerativeModel(selected_model)
                 
-                # "BLOCK_NONE" tells Google: "Don't hide the answer, I trust this content."
-                safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                ]
+                # --- THE UPDATED "SNIPER" PROMPT ---
+                prompt = f"""
+                You are an expert vintage reseller (Watches, Sneakers, Tech). 
+                Watch this video frame-by-frame.
                 
-                prompt = """
-                You are an expert eBay Seller. Watch this video.
-                Output valid JSON only. No markdown, no conversation.
-                Structure:
-                {
-                    "title": "SEO Title",
-                    "price_range": "Estimated Price",
-                    "condition": "Condition details",
+                CRITICAL INSTRUCTION:
+                1. Look for tiny text (e.g., "Made in Japan", "21 Jewels", Model numbers on caseback).
+                2. Distinguish variants (e.g., Seiko SKX007J vs SKX007K).
+                3. If unsure, state "Unverified" for that specific detail.
+                
+                Output JSON ONLY:
+                {{
+                    "title": "SEO Title (Include exact variant if visible)",
+                    "target_price": "Single value in {currency} (e.g. £250)",
+                    "price_reasoning": "Why this price? (e.g. 'Scratches on bezel reduce value')",
+                    "condition": "Strict condition report",
+                    "specifics": {{
+                        "Brand": "...",
+                        "Model": "...",
+                        "Variant": "..."
+                    }},
                     "description": "Sales description",
-                    "suggested_timestamps": ["00:05", "00:12"]
-                }
+                    "timestamps": ["00:04 (Dial shot)", "00:09 (Caseback)"]
+                }}
                 """
                 
-                # D. GENERATE CONTENT
+                # GENERATE
                 response = model.generate_content(
-                    [prompt, video_file], 
-                    safety_settings=safety_settings
+                    [prompt, video_file],
+                    safety_settings=[{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
                 )
                 
-                # E. ROBUST JSON PARSER
-                # This Regex finds the {...} block even if the AI says "Here is the JSON:"
+                # PARSE JSON
                 match = re.search(r"\{.*\}", response.text, re.DOTALL)
-                
                 if match:
-                    json_str = match.group(0)
-                    data = json.loads(json_str)
+                    data = json.loads(match.group(0))
 
-                    # DISPLAY RESULTS
+                    # --- RESULTS UI ---
                     tab1, tab2 = st.tabs(["📝 Listing", "💾 Raw Data"])
                     
                     with tab1:
-                        st.header(data.get("title", "No Title"))
-                        st.success(f"💰 {data.get('price_range', 'N/A')}")
-                        st.info(f"🔎 {data.get('condition', 'N/A')}")
+                        st.header(data.get("title"))
+                        
+                        # Price Box
+                        col1, col2 = st.columns(2)
+                        col1.metric("Target Price", data.get("target_price"))
+                        col2.info(data.get("price_reasoning"))
+                        
+                        st.warning(f"**Condition:** {data.get('condition')}")
+                        
+                        st.subheader("Details identified:")
+                        st.json(data.get("specifics"))
+                        
                         st.write("### Description")
-                        st.write(data.get("description", ""))
-                        st.write("### Best Screenshots at:")
-                        st.code(", ".join(data.get("suggested_timestamps", [])))
+                        st.write(data.get("description"))
+                        
+                        st.write("### 📸 Capture these frames:")
+                        for stamp in data.get("timestamps", []):
+                            st.code(stamp)
 
                     with tab2:
                         st.json(data)
                 else:
-                    st.error("AI returned text, but not JSON. Here is what it said:")
+                    st.error("Could not read AI response.")
                     st.write(response.text)
 
             except Exception as e:
                 st.error(f"Error: {e}")
-                # Debugging aid: If response exists, show it
-                if 'response' in locals() and response.prompt_feedback:
-                    st.warning(f"Blocked Reason: {response.prompt_feedback}")
