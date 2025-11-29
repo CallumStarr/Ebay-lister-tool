@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import time
+import re
 
 # 1. SETUP
 if "GOOGLE_API_KEY" in st.secrets:
@@ -13,89 +14,92 @@ else:
 
 st.set_page_config(page_title="eBay Video Lister", page_icon="🎥")
 st.title("🎥 eBay Video Auto-Lister")
-st.write("Upload a quick video walkthrough (10-30s). We'll do the rest.")
+st.write("Upload a video (10-45s) to generate a listing.")
 
 # 2. VIDEO UPLOADER
-uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov"])
+uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
 if uploaded_file:
-    # We need to save the video to a temporary file first
+    # Save video locally
     with open("temp_video.mp4", "wb") as f:
         f.write(uploaded_file.read())
     
     st.video(uploaded_file)
     
     if st.button("✨ Analyze Video"):
-        with st.spinner("Uploading to Gemini (this takes a moment)..."):
+        with st.spinner("Processing video... (This takes 10-20 seconds)"):
             try:
-                # Upload to Google's Server
+                # A. UPLOAD TO GOOGLE
                 video_file = genai.upload_file(path="temp_video.mp4")
                 
-                # Wait for processing (Video isn't instant like images)
+                # B. WAIT LOOP (Crucial for Video)
                 while video_file.state.name == "PROCESSING":
                     time.sleep(2)
                     video_file = genai.get_file(video_file.name)
 
                 if video_file.state.name == "FAILED":
-                    st.error("Video processing failed.")
+                    st.error("Google failed to process the video file.")
                     st.stop()
 
-                # CALL GEMINI 2.0 FLASH
-                model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+                # C. CONFIGURE MODEL WITH SAFETY OFF
+                # This prevents empty responses due to false alarms
+                model = genai.GenerativeModel('gemini-2.0-flash')
+                
+                # "BLOCK_NONE" tells Google: "Don't hide the answer, I trust this content."
+                safety_settings = [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                ]
                 
                 prompt = """
-                You are an expert eBay Power Seller. Watch this video carefully.
-                Output a valid JSON object with this structure:
+                You are an expert eBay Seller. Watch this video.
+                Output valid JSON only. No markdown, no conversation.
+                Structure:
                 {
-                    "title": "SEO Optimized Title (Max 80 chars)",
-                    "price_range": "Low - High",
-                    "condition": "Specific flaws mentioned or seen",
-                    "item_specifics": {
-                        "Brand": "...",
-                        "Color": "...",
-                        "Type": "..."
-                    },
-                    "description": "Persuasive sales description",
-                    "suggested_timestamps": [
-                        "00:02 (Front view)", 
-                        "00:05 (Back view)", 
-                        "00:10 (Tag/Label)",
-                        "00:15 (Defects if any)"
-                    ]
+                    "title": "SEO Title",
+                    "price_range": "Estimated Price",
+                    "condition": "Condition details",
+                    "description": "Sales description",
+                    "suggested_timestamps": ["00:05", "00:12"]
                 }
                 """
                 
-                response = model.generate_content([prompt, video_file])
+                # D. GENERATE CONTENT
+                response = model.generate_content(
+                    [prompt, video_file], 
+                    safety_settings=safety_settings
+                )
                 
-                # CLEANUP
-                clean_text = response.text.replace("```json", "").replace("```", "")
-                data = json.loads(clean_text)
+                # E. ROBUST JSON PARSER
+                # This Regex finds the {...} block even if the AI says "Here is the JSON:"
+                match = re.search(r"\{.*\}", response.text, re.DOTALL)
+                
+                if match:
+                    json_str = match.group(0)
+                    data = json.loads(json_str)
 
-                # DISPLAY TABS
-                tab1, tab2 = st.tabs(["📝 Listing Draft", "💾 Data for eBay"])
-
-                with tab1:
-                    st.header(data["title"])
-                    st.success(f"💰 Est. Price: {data['price_range']}")
-                    st.warning(f"🔎 Condition: {data['condition']}")
+                    # DISPLAY RESULTS
+                    tab1, tab2 = st.tabs(["📝 Listing", "💾 Raw Data"])
                     
-                    st.subheader("📸 Suggested Screenshots")
-                    st.write("Gemini found the best angles at these times:")
-                    for stamp in data["suggested_timestamps"]:
-                        st.code(stamp)
+                    with tab1:
+                        st.header(data.get("title", "No Title"))
+                        st.success(f"💰 {data.get('price_range', 'N/A')}")
+                        st.info(f"🔎 {data.get('condition', 'N/A')}")
+                        st.write("### Description")
+                        st.write(data.get("description", ""))
+                        st.write("### Best Screenshots at:")
+                        st.code(", ".join(data.get("suggested_timestamps", [])))
 
-                    st.write("### Description")
-                    st.write(data["description"])
-
-                with tab2:
-                    st.json(data)
-                    # This is where we would add the "Export CSV" button
-                    st.download_button(
-                        label="Download JSON for eBay",
-                        data=json.dumps(data, indent=2),
-                        file_name="ebay_listing.json",
-                        mime="application/json"
-                    )
+                    with tab2:
+                        st.json(data)
+                else:
+                    st.error("AI returned text, but not JSON. Here is what it said:")
+                    st.write(response.text)
 
             except Exception as e:
                 st.error(f"Error: {e}")
+                # Debugging aid: If response exists, show it
+                if 'response' in locals() and response.prompt_feedback:
+                    st.warning(f"Blocked Reason: {response.prompt_feedback}")
