@@ -81,8 +81,8 @@ if uploaded_file:
         f.write(uploaded_file.read())
     st.video(uploaded_file)
     
-    if st.button("✨ Create Bulletproof Listing"):
-        with st.spinner("Step 1: Optical Inspection & 360° Analysis..."):
+    if st.button("✨ Create Listing"):
+        with st.spinner("Running Optical Analysis & Creating Listing"):
             try:
                 # UPLOAD TO GEMINI
                 video_file = genai.upload_file(path="temp_video.mp4")
@@ -150,7 +150,7 @@ if uploaded_file:
                 INPUT: {detective_data['detected_brand']} {detective_data['detected_model']}
                 CONDITION: {detective_data['condition_report']['overall_grade']}
                 
-                TASK: Set a competitive "Buy It Now" price based on used market value.
+                TASK: Set a "Buy It Now" price based on market value and condition of item (if 100% confident of condition).
                 Output JSON: {{ "recommended_list_price": "float", "pricing_strategy_note": "string" }}
                 """
                 
@@ -203,7 +203,7 @@ if uploaded_file:
                 )
                 
                 st.markdown("---")
-                st.subheader("📸 360° Visual Analysis")
+                st.subheader("📸 Optimal Photo's for Ebay Listing")
                 st.caption("Auto-selected diverse angles for maximum buyer confidence.")
                 
                 photos = detective_data.get("listing_photos", [])
