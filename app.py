@@ -120,7 +120,7 @@ if uploaded_file:
                 STRATEGY:
                 - Use the Hint to identify the exact value (e.g. J model is worth more than K).
                 - Use the Condition to adjust price.
-                - Give a realistic List Price.
+                - Give a realistic fair List Price.
                 
                 Output JSON:
                 {{
@@ -150,7 +150,7 @@ if uploaded_file:
                 st.caption(f"**Condition:** {detective_data['condition_summary']}")
                 
                 st.markdown("---")
-                st.subheader("📸 Proof of Item")
+                st.subheader("📸 Photo's for Listing")
                 
                 for shot in detective_data.get("shots", []):
                     label = shot.get("label", "Shot")
