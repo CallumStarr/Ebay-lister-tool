@@ -92,8 +92,8 @@ if uploaded_file:
 
                 model = genai.GenerativeModel('gemini-2.0-flash')
 
-                # --- STEP 1: THE DIRECTOR PROMPT ---
-                # I have rewritten this to force GEOMETRIC DIVERSITY.
+                # --- STEP 1: THE DIRECTOR PROMPT (UPDATED) ---
+                # Key Change: Renamed "The Reveal" to "Macro Identifier" to force text/logo focus
                 detective_prompt = f"""
                 ROLE: You are an expert product photographer and eBay lister.
                 USER HINT: "{product_hint}"
@@ -101,14 +101,13 @@ if uploaded_file:
                 OBJECTIVE: Identify the item and select 4 DISTINCT photo angles.
                 
                 CRITICAL INSTRUCTION ON PHOTOS:
-                You must scan the ENTIRE video to find different perspectives. 
-                Do NOT select 3 images from the same 5-second segment.
+                You must scan the ENTIRE video. Do NOT select 3 images from the same 5-second segment.
                 
-                FIND THESE SPECIFIC SHOTS (If visible):
+                FIND THESE SPECIFIC SHOTS (Prioritize Clarity):
                 1. "Hero Shot": The best full front view of the product.
-                2. "The Reveal": The back of the item (labels/ports) or the bottom.
-                3. "The Profile": A side view showing thickness/depth.
-                4. "The Detail": Close up of a logo, texture, or defect.
+                2. "The Identifier": A close-up MACRO shot of the label, text, brand logo, or serial number. (Must be readable).
+                3. "The Profile": A side view showing thickness, buttons, or depth.
+                4. "Condition Shot": A specific angle showing any wear, texture, or the screen state.
                 
                 OUTPUT JSON SCHEMA:
                 {{
@@ -125,9 +124,9 @@ if uploaded_file:
                     "sales_description": "string (HTML format)",
                     "listing_photos": [
                         {{ "shot_type": "Hero Shot (Front)", "timestamp": "MM:SS", "reason": "Best full view" }},
-                        {{ "shot_type": "Back/Label View", "timestamp": "MM:SS", "reason": "Shows specs/model" }},
-                        {{ "shot_type": "Side/Profile", "timestamp": "MM:SS", "reason": "Shows depth/buttons" }},
-                        {{ "shot_type": "Detail/Texture", "timestamp": "MM:SS", "reason": "Shows condition" }}
+                        {{ "shot_type": "Macro/Identifier", "timestamp": "MM:SS", "reason": "Shows label/text" }},
+                        {{ "shot_type": "Side/Profile", "timestamp": "MM:SS", "reason": "Shows depth" }},
+                        {{ "shot_type": "Condition/Texture", "timestamp": "MM:SS", "reason": "Shows wear" }}
                     ]
                 }}
                 """
@@ -179,13 +178,34 @@ if uploaded_file:
                         st.warning(f"⚠️ Flaws: {', '.join(detective_data['condition_report']['specific_flaws'])}")
 
                 # --- STEP 3: EXPORT ---
-                # (Standard CSV generation code remains here - omitted for brevity but included in your file)
+                # (Standard CSV generation logic)
+                clean_price = str(price_data["recommended_list_price"]).replace(currency_code, '')
+                csv_dict = {
+                    "*Action": ["Add"],
+                    "*Title": [detective_data["ebay_seo_title"]],
+                    "*Description": [detective_data["sales_description"]],
+                    "*ConditionDescription": [detective_data['condition_report']['visual_reasoning']],
+                    "C:Brand": [detective_data.get("detected_brand", "")],
+                    "C:Model": [detective_data.get("detected_model", "")],
+                    "C:MPN": [detective_data.get("mpn_or_sku", "")],
+                    "*StartPrice": [clean_price],
+                    "Currency": [currency_code],
+                    "*Quantity": [1],
+                    "*Format": ["FixedPrice"]
+                }
+                df = pd.DataFrame(csv_dict)
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download eBay CSV",
+                    data=csv,
+                    file_name="smart_ebay_listing.csv",
+                    mime="text/csv",
+                )
                 
                 st.markdown("---")
                 st.subheader("📸 360° Visual Analysis")
                 st.caption("Auto-selected diverse angles for maximum buyer confidence.")
                 
-                # Dynamic Columns based on how many shots the AI actually found
                 photos = detective_data.get("listing_photos", [])
                 cols = st.columns(len(photos))
                 
