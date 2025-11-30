@@ -16,7 +16,7 @@ else:
 
 st.set_page_config(page_title="eBay Video Lister", page_icon="🎥")
 
-# --- HELPER: FRAME HUNTER ---
+# --- HELPER: ROBUST FRAME HUNTER ---
 def get_burst_frames(video_path, timestamp_str):
     try:
         if not timestamp_str or "none" in timestamp_str.lower(): return []
@@ -44,7 +44,7 @@ def get_burst_frames(video_path, timestamp_str):
 with st.sidebar:
     st.header("⚙️ Settings")
     currency = st.selectbox("Currency", ["£ (GBP)", "$ (USD)", "€ (EUR)"])
-    st.info("Mode: Dual-Brain (Detective + Accountant)")
+    st.caption("Mode: Expert Appraiser (High Value)")
 
 st.title("🎥 eBay Video Auto-Lister")
 
@@ -56,7 +56,7 @@ if uploaded_file:
     st.video(uploaded_file)
     
     if st.button("✨ Analyze Video"):
-        with st.spinner("Step 1: The Detective is identifying the item..."):
+        with st.spinner("Analyzing Dial Details & Market Value..."):
             try:
                 # UPLOAD
                 video_file = genai.upload_file(path="temp_video.mp4")
@@ -66,81 +66,87 @@ if uploaded_file:
 
                 model = genai.GenerativeModel('gemini-2.0-flash')
 
-                # --- STEP 1: THE DETECTIVE (High Detail, No Pricing) ---
-                detective_prompt = """
-                Act as a Forensic Authenticator. Watch the video.
-                Identify the item with EXTREME precision.
+                # --- STEP 1: THE VISUAL EXPERT (Writes Description & ID) ---
+                expert_prompt = f"""
+                Act as a Professional eBay Appraiser.
+                Watch the video closely.
                 
-                1. Read all text/labels.
-                2. Identify specific Model Numbers (e.g. 'SKX007K' vs 'SKX007J').
-                3. List every flaw (scratches, dents).
-                4. Find the best timestamps for photos.
+                1. IDENTIFY VARIANT:
+                   - If it's a Seiko SKX, look at the dial text at 6 o'clock. 
+                   - "21 JEWELS" or "MADE IN JAPAN" = J Model (Higher Value).
+                   - No "21 JEWELS" = K Model (Standard Value).
+                   - If unsure, assume the Standard Model but mention the ambiguity.
                 
-                Output JSON:
-                {
-                    "full_title": "Brand + Model + Variant",
-                    "specific_variant": "e.g. Made in Japan version",
-                    "condition_report": "Detailed list of flaws",
-                    "specs": {"Material": "...", "Size": "..."},
-                    "shots": {"Main": "00:00", "Label": "00:00", "Flaw": "00:00"}
-                }
-                """
+                2. WRITE DESCRIPTION:
+                   - Write a passionate, accurate sales description based on VISUALS.
+                   - Do not use generic filler. Describe THIS specific item.
                 
-                # Temp 0.4 allows it to "look around" and find small details
-                detective_resp = model.generate_content(
-                    [detective_prompt, video_file],
-                    generation_config=genai.types.GenerationConfig(temperature=0.4)
-                )
-                
-                detective_data = json.loads(re.search(r"\{.*\}", detective_resp.text, re.DOTALL).group(0))
-                
-                # --- STEP 2: THE ACCOUNTANT (Strict Logic, Pricing Only) ---
-                st.toast("Step 2: The Accountant is calculating price...")
-                
-                accountant_prompt = f"""
-                You are a strict pricing algorithm. You do not look at the video.
-                You rely ONLY on this report:
-                
-                ITEM: {detective_data['full_title']}
-                VARIANT: {detective_data['specific_variant']}
-                CONDITION: {detective_data['condition_report']}
-                
-                TASK:
-                Provide a single market price in {currency}.
-                Logic: If condition has flaws, lower the price. If variant is rare, raise it.
+                3. FIND SHOTS:
+                   - Find the best timestamps for Main View, Label/Dial, and Detail.
                 
                 Output JSON:
                 {{
-                    "target_price": "{currency}XXX",
-                    "price_reasoning": "Why this price?",
-                    "final_description": "Write a sales description using the Detective's notes."
+                    "full_title": "SEO Optimized Title",
+                    "variant_identified": "J or K or Standard",
+                    "visual_description": "The specific sales description text",
+                    "condition_rating": "Mint / Good / Fair",
+                    "shots": {{ "Main": "00:00", "Dial/Label": "00:00", "Side/Back": "00:00" }}
                 }}
                 """
                 
-                # Temp 0.1 forces consistency. Input A always equals Output B.
-                accountant_resp = model.generate_content(
-                    accountant_prompt,
-                    generation_config=genai.types.GenerationConfig(temperature=0.1)
+                # Temp 0.4 allows just enough flexibility to read blurry text
+                expert_resp = model.generate_content(
+                    [expert_prompt, video_file],
+                    generation_config=genai.types.GenerationConfig(temperature=0.4)
                 )
                 
-                price_data = json.loads(re.search(r"\{.*\}", accountant_resp.text, re.DOTALL).group(0))
+                expert_data = json.loads(re.search(r"\{.*\}", expert_resp.text, re.DOTALL).group(0))
+                
+                # --- STEP 2: THE MARKET VALUATOR (Pricing Only) ---
+                st.toast("Calculating market value...")
+                
+                valuator_prompt = f"""
+                You are a Market Value Database.
+                Determine the current average "Sold Listing" price on eBay for this item.
+                
+                ITEM: {expert_data['full_title']} ({expert_data['variant_identified']})
+                CONDITION: {expert_data['condition_rating']}
+                CURRENCY: {currency}
+                
+                INSTRUCTION:
+                - Do not give a 'Pawn Shop' price. Give the 'Collector' price.
+                - If it is a 'J' model, price higher.
+                - Output a single fixed number.
+                
+                Output JSON:
+                {{
+                    "market_price": "{currency}XXX",
+                    "price_note": "Short explanation of value"
+                }}
+                """
+                
+                # Temp 0.0 FORCES CONSISTENCY. Same input = Same Price.
+                valuator_resp = model.generate_content(
+                    valuator_prompt,
+                    generation_config=genai.types.GenerationConfig(temperature=0.0)
+                )
+                
+                price_data = json.loads(re.search(r"\{.*\}", valuator_resp.text, re.DOTALL).group(0))
 
-                # --- MERGE & DISPLAY ---
-                st.header(detective_data["full_title"])
+                # --- DISPLAY ---
+                st.header(expert_data["full_title"])
                 
                 col1, col2 = st.columns(2)
-                col1.metric("Target Price", price_data["target_price"])
-                col2.info(price_data["price_reasoning"])
+                col1.metric("Market Value", price_data["market_price"])
+                col2.success(f"Variant: {expert_data['variant_identified']}")
                 
-                st.write(price_data["final_description"])
-                st.caption(f"**Detailed Variant:** {detective_data['specific_variant']}")
-                st.caption(f"**Condition Notes:** {detective_data['condition_report']}")
+                st.write(expert_data["visual_description"])
+                st.caption(f"Pricing Logic: {price_data['price_note']}")
                 
                 st.markdown("---")
                 st.subheader("📸 Proof of Item")
                 
-                # PHOTO EXTRACTION
-                for shot_name, time_str in detective_data.get("shots", {}).items():
+                for shot_name, time_str in expert_data.get("shots", {}).items():
                     if time_str and time_str != "null":
                         st.write(f"**{shot_name}** ({time_str})")
                         photos = get_burst_frames("temp_video.mp4", time_str)
