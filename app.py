@@ -5,6 +5,7 @@ import time
 import re
 import cv2
 import numpy as np
+import pandas as pd # <--- Added this for CSV export
 
 # 1. SETUP
 if "GOOGLE_API_KEY" in st.secrets:
@@ -49,7 +50,7 @@ with st.sidebar:
 st.title("🎥 eBay Auto-Lister")
 
 # --- INPUT ---
-product_hint = st.text_input("Product Name/Code (Optional - e.g. 'SKX007J')")
+product_hint = st.text_input("Product Name/Item Code/Part Number (Optional - e.g. 'SKX007J')")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
@@ -58,8 +59,8 @@ if uploaded_file:
         f.write(uploaded_file.read())
     st.video(uploaded_file)
     
-    if st.button("✨ Analyze Video"):
-        with st.spinner("Analyzing visuals & writing SEO title..."):
+    if st.button("✨ Create Ebay Listing"):
+        with st.spinner("Analyzing product & creating ebay listing..."):
             try:
                 # UPLOAD
                 video_file = genai.upload_file(path="temp_video.mp4")
@@ -69,7 +70,7 @@ if uploaded_file:
 
                 model = genai.GenerativeModel('gemini-2.0-flash')
 
-                # --- STEP 1: THE CREATIVE DETECTIVE ---
+                # --- STEP 1: THE CREATIVE DETECTIVE (YOUR EXACT LOGIC) ---
                 detective_prompt = f"""
                 Act as an Expert eBay Lister.
                 
@@ -94,8 +95,8 @@ if uploaded_file:
                     "visual_description": "Rich sales description describing THIS item's condition and features.",
                     "shots": [
                         {{ "label": "Main View", "time": "00:00" }},
-                        {{ "label": "ID Tag / Dial", "time": "00:00" }},
-                        {{ "label": "Detail / Flaw", "time": "00:00" }}
+                        {{ "label": "Identification", "time": "00:00" }},
+                        {{ "label": "Detail/Flaw", "time": "00:00" }}
                     ]
                 }}
                 """
@@ -107,7 +108,7 @@ if uploaded_file:
                 
                 detective_data = json.loads(re.search(r"\{.*\}", detective_resp.text, re.DOTALL).group(0))
                 
-                # --- STEP 2: THE PRICER ---
+                # --- STEP 2: THE PRICER (YOUR EXACT LOGIC) ---
                 st.toast("Calculating list price...")
                 
                 valuator_prompt = f"""
@@ -147,23 +148,4 @@ if uploaded_file:
                     st.caption(f"✅ Enhanced by your info: '{product_hint}'")
                 
                 st.write(detective_data["visual_description"])
-                st.caption(f"**Condition:** {detective_data['condition_summary']}")
-                
-                st.markdown("---")
-                st.subheader("📸 Proof of Item")
-                
-                for shot in detective_data.get("shots", []):
-                    label = shot.get("label", "Shot")
-                    time_str = shot.get("time")
-                    
-                    if time_str and time_str != "null":
-                        st.write(f"**{label}** ({time_str})")
-                        photos = get_burst_frames("temp_video.mp4", time_str)
-                        if photos:
-                            c1, c2, c3 = st.columns(3)
-                            if len(photos) > 0: c1.image(photos[0], caption="Early", use_container_width=True)
-                            if len(photos) > 1: c2.image(photos[1], caption="Exact", use_container_width=True)
-                            if len(photos) > 2: c3.image(photos[2], caption="Late", use_container_width=True)
-
-            except Exception as e:
-                st.error(f"Error: {e}")
+                st.caption(f"**Condition:** {detective_data['
