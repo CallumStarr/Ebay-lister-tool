@@ -17,7 +17,7 @@ else:
 
 st.set_page_config(page_title="eBay Video Lister", page_icon="🎥")
 
-# --- HELPER: FRAME HUNTER ---
+# --- HELPER: ROBUST FRAME HUNTER ---
 def get_burst_frames(video_path, timestamp_str):
     try:
         if not timestamp_str or "none" in timestamp_str.lower(): return []
@@ -45,7 +45,7 @@ def get_burst_frames(video_path, timestamp_str):
 with st.sidebar:
     st.header("⚙️ Settings")
     currency_code = st.selectbox("Currency", ["GBP", "USD", "EUR", "JPY"])
-    st.caption("Mode: eBay CSV Exporter")
+    st.caption("Mode: Forensic ID + CSV Export")
 
 st.title("🎥 eBay Video Auto-Lister")
 
@@ -59,7 +59,7 @@ if uploaded_file:
     st.video(uploaded_file)
     
     if st.button("✨ Analyze & Create CSV"):
-        with st.spinner("Generating eBay Data..."):
+        with st.spinner("Forensic ID in progress (Reading text on item)..."):
             try:
                 # UPLOAD
                 video_file = genai.upload_file(path="temp_video.mp4")
@@ -69,27 +69,34 @@ if uploaded_file:
 
                 model = genai.GenerativeModel('gemini-2.0-flash')
 
-                # --- STEP 1: ANALYSIS & DESCRIPTION ---
+                # --- STEP 1: THE FORENSIC DETECTIVE (The logic that worked) ---
                 detective_prompt = f"""
-                Act as an eBay Listing Bot.
+                Act as a Forensic Text Extractor.
                 
                 USER HINT: "{product_hint}"
                 
-                1. IDENTIFY: Use visual evidence + hint to ID the item.
-                2. WRITE TITLE: Create an SEO-rich title (Max 80 chars).
-                3. WRITE DESCRIPTION: Professional HTML-ready description.
-                4. SPECIFICS: List Brand, MPN (Model Number), and Type.
+                TASK 1: READ THE ITEM (Do not guess)
+                - Watch the video.
+                - List 3 exact phrases or numbers written on the item.
+                - WATCHES: Look for "DIVER'S 200m" (SKX) vs "Automatic" (SRPD). Look for "21 JEWELS".
+                - TOOLS: Look for Model Numbers (e.g. DCF887) and Voltage.
+                
+                TASK 2: IDENTIFY
+                - Use those EXACT strings to name the item.
+                - If "DIVER'S 200m" is present, it is an SKX, NOT an SRPE/5KX.
+                
+                TASK 3: FIND SHOTS
+                - Select 3 timestamps showing the Item, the Text/Label, and any Detail.
                 
                 Output JSON:
                 {{
-                    "seo_title": "Full Title",
-                    "description": "HTML description",
-                    "condition_id": "3000 (Used) or 1000 (New)",
-                    "item_specifics": {{ "Brand": "...", "Model": "...", "Type": "..." }},
+                    "visible_text": ["String 1", "String 2"],
+                    "full_title": "Precise Item Name",
+                    "condition_summary": "Short condition notes",
                     "shots": [
-                        {{ "label": "Main", "time": "00:00" }},
-                        {{ "label": "Label", "time": "00:00" }},
-                        {{ "label": "Detail", "time": "00:00" }}
+                        {{ "label": "Main View", "time": "00:00" }},
+                        {{ "label": "Text/Label/Dial", "time": "00:00" }},
+                        {{ "label": "Side/Detail", "time": "00:00" }}
                     ]
                 }}
                 """
@@ -101,46 +108,59 @@ if uploaded_file:
                 
                 detective_data = json.loads(re.search(r"\{.*\}", detective_resp.text, re.DOTALL).group(0))
                 
-                # --- STEP 2: PRICING ---
-                valuator_prompt = f"""
-                You are an eBay Power Seller.
-                Item: {detective_data['seo_title']}
-                Hint: {product_hint}
+                # --- STEP 2: THE LISTER (Formats for eBay CSV) ---
+                st.toast(f"Identified: {detective_data['full_title']}. Generating CSV...")
                 
-                Output a SINGLE number for the list price in {currency_code}.
-                Do not include currency symbols. Just the number (e.g. 275.00).
+                lister_prompt = f"""
+                Act as an eBay File Exchange Bot.
                 
-                Output JSON: {{ "price": "275.00" }}
+                ITEM: {detective_data['full_title']}
+                CONDITION: {detective_data['condition_summary']}
+                USER HINT: {product_hint}
+                
+                1. PRICE: Give a realistic "Buy It Now" price in {currency_code} (Number only).
+                2. TITLE: Write an 80-char SEO title.
+                3. SPECIFICS: Extract Brand, Model, Type.
+                4. DESCRIPTION: Write a sales description in HTML format.
+                
+                Output JSON:
+                {{
+                    "price": "275.00",
+                    "title": "SEO Title",
+                    "description": "<p>HTML Description</p>",
+                    "specifics": {{ "Brand": "...", "Model": "..." }},
+                    "condition_id": "3000"
+                }}
                 """
                 
-                valuator_resp = model.generate_content(
-                    valuator_prompt,
+                lister_resp = model.generate_content(
+                    lister_prompt,
                     generation_config=genai.types.GenerationConfig(temperature=0.0)
                 )
-                price_data = json.loads(re.search(r"\{.*\}", valuator_resp.text, re.DOTALL).group(0))
+                
+                listing_data = json.loads(re.search(r"\{.*\}", lister_resp.text, re.DOTALL).group(0))
 
                 # --- DISPLAY ---
-                st.header(detective_data["seo_title"])
-                st.metric("List Price", f"{currency_code} {price_data['price']}")
+                st.header(listing_data["title"])
+                st.metric("List Price", f"{currency_code} {listing_data['price']}")
+                st.caption(f"Verified via: {detective_data['visible_text']}")
                 
                 st.markdown("---")
                 
-                # --- CREATE CSV FOR EBAY ---
-                # These headers map to eBay's official File Exchange format
+                # --- CSV EXPORT ---
                 csv_data = {
                     "*Action": ["Add"],
-                    "*Category": ["123456 (Check ID)"], # Placeholder
-                    "*Title": [detective_data["seo_title"]],
-                    "*Description": [detective_data["description"]],
-                    "*ConditionID": [detective_data["condition_id"]],
-                    "*StartPrice": [price_data["price"]],
+                    "*Category": ["123456 (Check ID)"], 
+                    "*Title": [listing_data["title"]],
+                    "*Description": [listing_data["description"]],
+                    "*ConditionID": [listing_data["condition_id"]],
+                    "*StartPrice": [listing_data["price"]],
                     "*Quantity": [1],
                     "*Format": ["FixedPrice"],
                     "Currency": [currency_code]
                 }
                 
-                # Add Item Specifics (C:Brand, C:Model)
-                for key, val in detective_data["item_specifics"].items():
+                for key, val in listing_data["specifics"].items():
                     csv_data[f"C:{key}"] = [val]
 
                 df = pd.DataFrame(csv_data)
@@ -152,20 +172,22 @@ if uploaded_file:
                     file_name="ebay_draft.csv",
                     mime="text/csv",
                 )
-                
-                st.info("ℹ️ Upload this CSV to eBay Seller Hub -> Reports -> Upload.")
+                st.info("Upload to: Seller Hub > Reports > Uploads")
 
                 st.markdown("---")
-                st.subheader("📸 Proof of Item (Save these!)")
+                st.subheader("📸 Proof of Item")
                 
                 for shot in detective_data.get("shots", []):
                     label = shot.get("label", "Shot")
                     time_str = shot.get("time")
                     if time_str and time_str != "null":
+                        st.write(f"**{label}** ({time_str})")
                         photos = get_burst_frames("temp_video.mp4", time_str)
                         if photos:
-                            st.write(f"**{label}** ({time_str})")
-                            st.image(photos[1], caption="Best Shot", use_container_width=True) # Show middle shot
+                            c1, c2, c3 = st.columns(3)
+                            if len(photos) > 0: c1.image(photos[0], caption="Early", use_container_width=True)
+                            if len(photos) > 1: c2.image(photos[1], caption="Exact", use_container_width=True)
+                            if len(photos) > 2: c3.image(photos[2], caption="Late", use_container_width=True)
 
             except Exception as e:
                 st.error(f"Error: {e}")
