@@ -17,32 +17,31 @@ else:
 
 st.set_page_config(page_title="eBay Auto-Lister Pro", page_icon="🎥")
 
-# --- HELPER: FRAME HUNTER ---
-def get_burst_frames(video_path, timestamp_str):
+# --- HELPER: FRAME HUNTER (UPDATED) ---
+def get_best_frame(video_path, timestamp_str):
+    """Captures a single frame at the exact timestamp."""
     try:
-        if not timestamp_str or "none" in str(timestamp_str).lower(): return []
+        if not timestamp_str or "none" in str(timestamp_str).lower(): return None
         # Robust regex to catch MM:SS or M:SS
         clean_time = re.search(r"(\d{1,2}:\d{2})", str(timestamp_str))
-        if not clean_time: return []
+        if not clean_time: return None
         
         minutes, seconds = map(int, clean_time.group(1).split(':'))
-        center_time = (minutes * 60) + seconds
+        target_time = (minutes * 60) + seconds
         
         cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened(): return []
+        if not cap.isOpened(): return None
         
-        frames = []
-        # Grab frame at exact time, slightly before, and slightly after
-        offsets = [-0.5, 0.0, 0.5]
-        for offset in offsets:
-            target_time = center_time + offset
-            if target_time < 0: continue
-            cap.set(cv2.CAP_PROP_POS_MSEC, target_time * 1000)
-            ret, frame = cap.read()
-            if ret: frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        # Grab frame at exact time
+        cap.set(cv2.CAP_PROP_POS_MSEC, target_time * 1000)
+        ret, frame = cap.read()
         cap.release()
-        return frames
-    except: return []
+        
+        if ret:
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        else:
+            return None
+    except: return None
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -82,8 +81,8 @@ if uploaded_file:
                 OBJECTIVE: Analyze the video frame-by-frame to extract technical specifications and visual condition.
                 
                 CRITICAL TASKS:
-                1. IDENTIFY THE ITEM: Look for labels, model numbers on the bottom/back, and startup screens.
-                2. ASSESS CONDITION: Look specifically for: scratches, fraying, dents, or missing parts. However do not mention them/apply this to final pricing unless absolutely certain the condition assessment is 100% confident.
+                1. IDENTIFY THE ITEM: Look for labels, model numbers on the bottom/back, and startup screens. Provide only an expert level understanding of the product
+                2. ASSESS CONDITION: Look specifically for: scratches, fraying, dents, or missing parts.
                 3. EXTRACT TEXT: OCR any visible text that helps identification (Serial numbers, Brand names).
                 4. GENERATE SEO DATA: Create an 80-char max title using the formula: [Brand] [Model] [Key Feature] [Condition].
                 
@@ -116,11 +115,11 @@ if uploaded_file:
                     [detective_prompt, video_file],
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.2,
-                        response_mime_type="application/json" # <--- KEY UPGRADE: Forces Valid JSON
+                        response_mime_type="application/json"
                     )
                 )
                 
-                # Direct JSON load (No regex needed!)
+                # Direct JSON load
                 detective_data = json.loads(detective_resp.text)
                 
                 # --- STEP 2: THE APPRAISER (Logic & Pricing) ---
@@ -182,7 +181,6 @@ if uploaded_file:
                 
                 # Flatten specs for CSV
                 specs = detective_data.get("item_specifics", {})
-                specs_str = "; ".join([f"{k}:{v}" for k,v in specs.items()])
                 
                 csv_dict = {
                     "*Action": ["Add"],
@@ -204,27 +202,27 @@ if uploaded_file:
                 st.download_button(
                     label="📥 Download eBay CSV",
                     data=csv,
-                    file_name="bulletproof_ebay_listing.csv",
+                    file_name="ebay_listing.csv",
                     mime="text/csv",
                 )
                 
                 st.markdown("---")
-                st.subheader("📸 Proof of Condition (Auto-Captured)")
+                st.subheader("📸 Optimal Photo's For Ebay Listing (Based on Video")
                 
                 # Display photos based on the timestamps identified by AI
+                # This loop now displays only the single "Best Shot" for each timestamp.
                 for shot in detective_data.get("listing_photos", []):
                     label = shot.get("label", "Shot")
                     time_str = shot.get("timestamp")
                     
                     if time_str:
                         st.write(f"**{label}** @ {time_str}")
-                        photos = get_burst_frames("temp_video.mp4", time_str)
+                        # Use the new helper function to get the single best frame
+                        best_frame = get_best_frame("temp_video.mp4", time_str)
                         
-                        if photos:
-                            c1, c2, c3 = st.columns(3)
-                            if len(photos) > 0: c1.image(photos[0], caption="Pre-Shot", use_container_width=True)
-                            if len(photos) > 1: c2.image(photos[1], caption="Best Shot", use_container_width=True)
-                            if len(photos) > 2: c3.image(photos[2], caption="Post-Shot", use_container_width=True)
+                        if best_frame is not None:
+                            # Display the single image
+                            st.image(best_frame, caption="Best Shot", use_container_width=True)
 
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
