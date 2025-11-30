@@ -3,3 +3,4 @@ google-generativeai
 Pillow
 opencv-python-headless
 numpy
+pandas
