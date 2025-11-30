@@ -5,6 +5,7 @@ import time
 import re
 import cv2
 import numpy as np
+import pandas as pd
 
 # 1. SETUP
 if "GOOGLE_API_KEY" in st.secrets:
@@ -43,13 +44,12 @@ def get_burst_frames(video_path, timestamp_str):
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    currency_code = st.selectbox("Currency", ["£", "$", "€", "¥"])
-    st.caption("Mode: Hybrid (Guide + Create)")
+    currency_code = st.selectbox("Currency", ["GBP", "USD", "EUR", "JPY"])
+    st.caption("Mode: eBay CSV Exporter")
 
-st.title("🎥 eBay Auto-Lister")
+st.title("🎥 eBay Video Auto-Lister")
 
-# --- INPUT ---
-product_hint = st.text_input("Product Name/ID Code/Part Number (Optional - e.g. 'SKX007J')")
+product_hint = st.text_input("Product Name/Code (Optional - e.g. 'SKX007J')")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
@@ -58,8 +58,8 @@ if uploaded_file:
         f.write(uploaded_file.read())
     st.video(uploaded_file)
     
-    if st.button("✨ Analyze Product"):
-        with st.spinner("Analyzing Product & creating Ebay listing..."):
+    if st.button("✨ Analyze & Create CSV"):
+        with st.spinner("Generating eBay Data..."):
             try:
                 # UPLOAD
                 video_file = genai.upload_file(path="temp_video.mp4")
@@ -69,101 +69,103 @@ if uploaded_file:
 
                 model = genai.GenerativeModel('gemini-2.0-flash')
 
-                # --- STEP 1: THE CREATIVE DETECTIVE ---
+                # --- STEP 1: ANALYSIS & DESCRIPTION ---
                 detective_prompt = f"""
-                Act as an Expert eBay Lister.
+                Act as an eBay Listing Bot.
                 
-                USER INPUT: "{product_hint}"
+                USER HINT: "{product_hint}"
                 
-                INSTRUCTIONS:
-                1. USE THE INPUT (if provided) to confirm the model identity.
-                2. WATCH THE VIDEO to see the specific condition, color, and features (e.g. "Scratched", "No battery").
-                3. GENERATE A FULL TITLE: Do NOT just output the model code. Write a keyword-stuffed title (Max 80 chars).
-                   - Bad: "SKX007J"
-                   - Good: "Seiko SKX007J Diver Automatic Watch 200m Made in Japan Jubilee"
-                
-                TASK:
-                - Find 3 text strings visible in the video (e.g. "21 Jewels").
-                - Find 3 timestamps for photos.
+                1. IDENTIFY: Use visual evidence + hint to ID the item.
+                2. WRITE TITLE: Create an SEO-rich title (Max 80 chars).
+                3. WRITE DESCRIPTION: Professional HTML-ready description.
+                4. SPECIFICS: List Brand, MPN (Model Number), and Type.
                 
                 Output JSON:
                 {{
-                    "visible_text": ["String 1", "String 2"],
-                    "seo_title": "Full Keyword Rich Title (Brand + Model + Features)",
-                    "condition_summary": "Specific notes on wear/tear seen in video",
-                    "visual_description": "Rich sales description describing THIS item's condition and features.",
+                    "seo_title": "Full Title",
+                    "description": "HTML description",
+                    "condition_id": "3000 (Used) or 1000 (New)",
+                    "item_specifics": {{ "Brand": "...", "Model": "...", "Type": "..." }},
                     "shots": [
-                        {{ "label": "Main View", "time": "00:00" }},
-                        {{ "label": "ID Tag / Dial", "time": "00:00" }},
-                        {{ "label": "Detail / Flaw", "time": "00:00" }}
+                        {{ "label": "Main", "time": "00:00" }},
+                        {{ "label": "Label", "time": "00:00" }},
+                        {{ "label": "Detail", "time": "00:00" }}
                     ]
                 }}
                 """
                 
                 detective_resp = model.generate_content(
                     [detective_prompt, video_file],
-                    generation_config=genai.types.GenerationConfig(temperature=0.3)
+                    generation_config=genai.types.GenerationConfig(temperature=0.2)
                 )
                 
                 detective_data = json.loads(re.search(r"\{.*\}", detective_resp.text, re.DOTALL).group(0))
                 
-                # --- STEP 2: THE PRICER ---
-                st.toast("Calculating list price...")
-                
+                # --- STEP 2: PRICING ---
                 valuator_prompt = f"""
-                You are an eBay Power Seller. Set the "Buy It Now" Price.
+                You are an eBay Power Seller.
+                Item: {detective_data['seo_title']}
+                Hint: {product_hint}
                 
-                ITEM TITLE: {detective_data['seo_title']}
-                CONDITION: {detective_data['condition_summary']}
-                USER HINT WAS: "{product_hint}"
+                Output a SINGLE number for the list price in {currency_code}.
+                Do not include currency symbols. Just the number (e.g. 275.00).
                 
-                STRATEGY:
-                - Use the Hint to identify the exact value (e.g. J model is worth more than K).
-                - Use the Condition to adjust price.
-                - Give a realistic fair List Price.
-                
-                Output JSON:
-                {{
-                    "list_price": "{currency_code}XXX",
-                    "price_strategy": "Explain reasoning based on Model + Condition"
-                }}
+                Output JSON: {{ "price": "275.00" }}
                 """
                 
                 valuator_resp = model.generate_content(
                     valuator_prompt,
                     generation_config=genai.types.GenerationConfig(temperature=0.0)
                 )
-                
                 price_data = json.loads(re.search(r"\{.*\}", valuator_resp.text, re.DOTALL).group(0))
 
                 # --- DISPLAY ---
                 st.header(detective_data["seo_title"])
-                
-                col1, col2 = st.columns(2)
-                col1.metric("List Price", price_data["list_price"])
-                col2.success(f"Strategy: {price_data['price_strategy']}")
-                
-                if product_hint:
-                    st.caption(f"✅ Enhanced by your info: '{product_hint}'")
-                
-                st.write(detective_data["visual_description"])
-                st.caption(f"**Condition:** {detective_data['condition_summary']}")
+                st.metric("List Price", f"{currency_code} {price_data['price']}")
                 
                 st.markdown("---")
-                st.subheader("📸 Photo's for Listing")
+                
+                # --- CREATE CSV FOR EBAY ---
+                # These headers map to eBay's official File Exchange format
+                csv_data = {
+                    "*Action": ["Add"],
+                    "*Category": ["123456 (Check ID)"], # Placeholder
+                    "*Title": [detective_data["seo_title"]],
+                    "*Description": [detective_data["description"]],
+                    "*ConditionID": [detective_data["condition_id"]],
+                    "*StartPrice": [price_data["price"]],
+                    "*Quantity": [1],
+                    "*Format": ["FixedPrice"],
+                    "Currency": [currency_code]
+                }
+                
+                # Add Item Specifics (C:Brand, C:Model)
+                for key, val in detective_data["item_specifics"].items():
+                    csv_data[f"C:{key}"] = [val]
+
+                df = pd.DataFrame(csv_data)
+                csv = df.to_csv(index=False).encode('utf-8')
+
+                st.download_button(
+                    label="📥 Download eBay CSV",
+                    data=csv,
+                    file_name="ebay_draft.csv",
+                    mime="text/csv",
+                )
+                
+                st.info("ℹ️ Upload this CSV to eBay Seller Hub -> Reports -> Upload.")
+
+                st.markdown("---")
+                st.subheader("📸 Proof of Item (Save these!)")
                 
                 for shot in detective_data.get("shots", []):
                     label = shot.get("label", "Shot")
                     time_str = shot.get("time")
-                    
                     if time_str and time_str != "null":
-                        st.write(f"**{label}** ({time_str})")
                         photos = get_burst_frames("temp_video.mp4", time_str)
                         if photos:
-                            c1, c2, c3 = st.columns(3)
-                            if len(photos) > 0: c1.image(photos[0], caption="Before", use_container_width=True)
-                            if len(photos) > 1: c2.image(photos[1], caption="Best", use_container_width=True)
-                            if len(photos) > 2: c3.image(photos[2], caption="After", use_container_width=True)
+                            st.write(f"**{label}** ({time_str})")
+                            st.image(photos[1], caption="Best Shot", use_container_width=True) # Show middle shot
 
             except Exception as e:
                 st.error(f"Error: {e}")
