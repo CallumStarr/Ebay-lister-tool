@@ -1,4 +1,3 @@
-
 import streamlit as st
 import google.generativeai as genai
 import json
@@ -16,13 +15,14 @@ else:
     st.error("Missing API Key.")
     st.stop()
 
-st.set_page_config(page_title="eBay Auto-Lister", page_icon="🎥")
+st.set_page_config(page_title="eBay Auto-Lister Pro", page_icon="🎥")
 
 # --- HELPER: FRAME HUNTER ---
 def get_burst_frames(video_path, timestamp_str):
     try:
-        if not timestamp_str or "none" in timestamp_str.lower(): return []
-        clean_time = re.search(r"(\d{1,2}:\d{2})", timestamp_str)
+        if not timestamp_str or "none" in str(timestamp_str).lower(): return []
+        # Robust regex to catch MM:SS or M:SS
+        clean_time = re.search(r"(\d{1,2}:\d{2})", str(timestamp_str))
         if not clean_time: return []
         
         minutes, seconds = map(int, clean_time.group(1).split(':'))
@@ -32,6 +32,7 @@ def get_burst_frames(video_path, timestamp_str):
         if not cap.isOpened(): return []
         
         frames = []
+        # Grab frame at exact time, slightly before, and slightly after
         offsets = [-0.5, 0.0, 0.5]
         for offset in offsets:
             target_time = center_time + offset
@@ -46,24 +47,25 @@ def get_burst_frames(video_path, timestamp_str):
 with st.sidebar:
     st.header("⚙️ Settings")
     currency_code = st.selectbox("Currency", ["£", "$", "€", "¥"])
-    st.caption("Mode: Hybrid (Guide + Create)")
+    st.caption("Mode: Deep Analysis (Gemini 2.0 Flash)")
 
-st.title("🎥 eBay Auto-Lister")
+st.title("🎥 eBay Auto-Lister Pro")
 
 # --- INPUT ---
-product_hint = st.text_input("Product Name/Item Code (Optional - e.g. 'SKX007J')")
+product_hint = st.text_input("Product Hint (Optional - e.g. 'Sony A6000', 'Nike Air Max')")
 
 uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
 if uploaded_file:
+    # Save locally for CV2 frame extraction later
     with open("temp_video.mp4", "wb") as f:
         f.write(uploaded_file.read())
     st.video(uploaded_file)
     
-    if st.button("✨ Create Ebay Listing"):
-        with st.spinner("Analyzing product & creating ebay listing..."):
+    if st.button("✨ Create Bulletproof Listing"):
+        with st.spinner("Step 1: Optical Inspection & Identification..."):
             try:
-                # UPLOAD
+                # UPLOAD TO GEMINI
                 video_file = genai.upload_file(path="temp_video.mp4")
                 while video_file.state.name == "PROCESSING":
                     time.sleep(1)
@@ -71,94 +73,125 @@ if uploaded_file:
 
                 model = genai.GenerativeModel('gemini-2.0-flash')
 
-                # --- STEP 1: THE CREATIVE DETECTIVE ---
+                # --- STEP 1: THE INSPECTOR (Visual Analysis) ---
                 detective_prompt = f"""
-                Act as an Expert eBay Lister.
+                ROLE: You are an automated optical inspection system for eBay inventory.
                 
-                USER INPUT: "{product_hint}"
+                USER HINT: "{product_hint}"
                 
-                INSTRUCTIONS:
-                1. USE THE INPUT (if provided) to confirm the model identity.
-                2. WATCH THE VIDEO to see specific condition, color, and features.
-                3. GENERATE A FULL TITLE: Do NOT just output the model code. Write a keyword-stuffed title (Max 80 chars).
+                OBJECTIVE: Analyze the video frame-by-frame to extract technical specifications and visual condition.
                 
-                TASK:
-                - Find 3 text strings visible in the video.
-                - Find 3 timestamps for optimal ebay listing photos.
+                CRITICAL TASKS:
+                1. IDENTIFY THE ITEM: Look for labels, model numbers on the bottom/back, and startup screens.
+                2. ASSESS CONDITION: Look specifically for: scratches, fraying, dents, or missing parts.
+                3. EXTRACT TEXT: OCR any visible text that helps identification (Serial numbers, Brand names).
+                4. GENERATE SEO DATA: Create an 80-char max title using the formula: [Brand] [Model] [Key Feature] [Condition].
                 
-                Output JSON:
+                OUTPUT REQUIREMENTS:
+                Return ONLY raw JSON using this specific schema:
                 {{
-                    "visible_text": ["String 1", "String 2"],
-                    "seo_title": "Full Keyword Rich Title",
-                    "condition_summary": "Specific notes on wear/tear",
-                    "visual_description": "Rich sales description",
-                    "shots": [
-                        {{ "label": "Main View", "time": "00:00" }},
-                        {{ "label": "Identification", "time": "00:00" }},
-                        {{ "label": "Detail/Flaw", "time": "00:00" }}
+                    "detected_brand": "string",
+                    "detected_model": "string",
+                    "mpn_or_sku": "string (or null if not visible)",
+                    "ebay_seo_title": "string (max 80 chars)",
+                    "item_specifics": {{
+                        "Color": "string",
+                        "Type": "string"
+                    }},
+                    "condition_report": {{
+                        "overall_grade": "Like New | Good | Fair | For Parts",
+                        "specific_flaws": ["string", "string"],
+                        "visual_reasoning": "string"
+                    }},
+                    "sales_description": "string (HTML formatted paragraph for eBay description)",
+                    "listing_photos": [
+                        {{ "label": "Main Front View", "timestamp": "MM:SS" }},
+                        {{ "label": "Model/Label Macro", "timestamp": "MM:SS" }},
+                        {{ "label": "Damage/Detail", "timestamp": "MM:SS" }}
                     ]
                 }}
                 """
                 
                 detective_resp = model.generate_content(
                     [detective_prompt, video_file],
-                    generation_config=genai.types.GenerationConfig(temperature=0.3)
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.2,
+                        response_mime_type="application/json" # <--- KEY UPGRADE: Forces Valid JSON
+                    )
                 )
                 
-                detective_data = json.loads(re.search(r"\{.*\}", detective_resp.text, re.DOTALL).group(0))
+                # Direct JSON load (No regex needed!)
+                detective_data = json.loads(detective_resp.text)
                 
-                # --- STEP 2: THE PRICER ---
-                st.toast("Calculating list price...")
+                # --- STEP 2: THE APPRAISER (Logic & Pricing) ---
+                st.toast(f"Identified: {detective_data['ebay_seo_title']}")
+                st.spinner("Step 2: Market Analysis & Pricing...")
                 
                 valuator_prompt = f"""
-                You are an eBay Power Seller. Set the "Buy It Now" Price.
+                ROLE: You are a veteran eBay Market Analyst.
                 
-                ITEM TITLE: {detective_data['seo_title']}
-                CONDITION: {detective_data['condition_summary']}
-                USER HINT WAS: "{product_hint}"
+                INPUT DATA:
+                - Item: {detective_data['detected_brand']} {detective_data['detected_model']}
+                - MPN/SKU: {detective_data['mpn_or_sku']}
+                - Condition: {detective_data['condition_report']['overall_grade']}
+                - Flaws: {detective_data['condition_report']['specific_flaws']}
+                - User Hint: "{product_hint}"
                 
-                STRATEGY:
-                - Use the Hint to identify the exact value.
-                - Use the Condition to adjust price.
-                - Give a realistic fair Ebay Listing Price.
+                TASK: Determine the optimal "Buy It Now" listing price.
+                NOTE: As a specific used item, do not price at MSRP. Price based on current used market value depreciation.
                 
                 Output JSON:
                 {{
-                    "list_price": "{currency_code}XXX",
-                    "price_strategy": "Explain reasoning"
+                    "market_analysis": "string (Explain the value tier of this item)",
+                    "recommended_list_price": "float (Just the number, e.g. 45.00)",
+                    "pricing_strategy_note": "string (e.g. 'Priced lower due to screen scratch')"
                 }}
                 """
                 
                 valuator_resp = model.generate_content(
                     valuator_prompt,
-                    generation_config=genai.types.GenerationConfig(temperature=0.0)
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1,
+                        response_mime_type="application/json"
+                    )
                 )
                 
-                price_data = json.loads(re.search(r"\{.*\}", valuator_resp.text, re.DOTALL).group(0))
+                price_data = json.loads(valuator_resp.text)
 
-                # --- DISPLAY ---
-                st.header(detective_data["seo_title"])
+                # --- DISPLAY RESULTS ---
+                st.header(detective_data["ebay_seo_title"])
                 
                 col1, col2 = st.columns(2)
-                col1.metric("List Price", price_data["list_price"])
-                col2.success(f"Strategy: {price_data['price_strategy']}")
+                col1.metric("Recommended Price", f"{currency_code}{price_data['recommended_list_price']}")
+                col2.info(f"Strategy: {price_data['pricing_strategy_note']}")
                 
-                if product_hint:
-                    st.caption(f"✅ Enhanced by your info: '{product_hint}'")
-                
-                st.write(detective_data["visual_description"])
-                st.caption(f"**Condition:** {detective_data['condition_summary']}")
-                
+                with st.expander("📝 Description & Condition", expanded=True):
+                    st.markdown(detective_data["sales_description"], unsafe_allow_html=True)
+                    st.markdown("---")
+                    st.write(f"**Condition Grade:** {detective_data['condition_report']['overall_grade']}")
+                    if detective_data['condition_report']['specific_flaws']:
+                        st.warning("**Detected Flaws:**")
+                        for flaw in detective_data['condition_report']['specific_flaws']:
+                            st.write(f"- {flaw}")
+
                 # --- STEP 3: EXPORT TO CSV ---
                 st.markdown("---")
                 
-                clean_price = re.sub(r'[^\d.]', '', price_data["list_price"])
+                # Clean price logic
+                clean_price = str(price_data["recommended_list_price"]).replace(currency_code, '')
+                
+                # Flatten specs for CSV
+                specs = detective_data.get("item_specifics", {})
+                specs_str = "; ".join([f"{k}:{v}" for k,v in specs.items()])
                 
                 csv_dict = {
                     "*Action": ["Add"],
-                    "*Title": [detective_data["seo_title"]],
-                    "*Description": [detective_data["visual_description"]],
-                    "*ConditionDescription": [detective_data["condition_summary"]],
+                    "*Title": [detective_data["ebay_seo_title"]],
+                    "*Description": [detective_data["sales_description"]],
+                    "*ConditionDescription": [detective_data['condition_report']['visual_reasoning']],
+                    "C:Brand": [detective_data.get("detected_brand", "")],
+                    "C:Model": [detective_data.get("detected_model", "")],
+                    "C:MPN": [detective_data.get("mpn_or_sku", "")],
                     "*StartPrice": [clean_price],
                     "Currency": [currency_code],
                     "*Quantity": [1],
@@ -171,25 +204,27 @@ if uploaded_file:
                 st.download_button(
                     label="📥 Download eBay CSV",
                     data=csv,
-                    file_name="ebay_listing.csv",
+                    file_name="bulletproof_ebay_listing.csv",
                     mime="text/csv",
                 )
                 
                 st.markdown("---")
-                st.subheader("📸 Optimal Photos for Listing")
+                st.subheader("📸 Proof of Condition (Auto-Captured)")
                 
-                for shot in detective_data.get("shots", []):
+                # Display photos based on the timestamps identified by AI
+                for shot in detective_data.get("listing_photos", []):
                     label = shot.get("label", "Shot")
-                    time_str = shot.get("time")
+                    time_str = shot.get("timestamp")
                     
-                    if time_str and time_str != "null":
-                        st.write(f"**{label}** ({time_str})")
+                    if time_str:
+                        st.write(f"**{label}** @ {time_str}")
                         photos = get_burst_frames("temp_video.mp4", time_str)
+                        
                         if photos:
                             c1, c2, c3 = st.columns(3)
-                            if len(photos) > 0: c1.image(photos[0], caption="1s before", use_container_width=True)
-                            if len(photos) > 1: c2.image(photos[1], caption="Best", use_container_width=True)
-                            if len(photos) > 2: c3.image(photos[2], caption="1s after", use_container_width=True)
+                            if len(photos) > 0: c1.image(photos[0], caption="Pre-Shot", use_container_width=True)
+                            if len(photos) > 1: c2.image(photos[1], caption="Best Shot", use_container_width=True)
+                            if len(photos) > 2: c3.image(photos[2], caption="Post-Shot", use_container_width=True)
 
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Analysis failed: {e}")
