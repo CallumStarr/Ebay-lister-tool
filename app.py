@@ -14,7 +14,7 @@ else:
     st.error("Missing API Key.")
     st.stop()
 
-st.set_page_config(page_title="eBay Auto-Lister", page_subtitle= "test" , page_icon="🎥")
+st.set_page_config(page_title="eBay Auto-Lister", page_icon="🎥")
 
 # --- HELPER: FRAME HUNTER ---
 def get_burst_frames(video_path, timestamp_str):
