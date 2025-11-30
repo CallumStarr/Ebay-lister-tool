@@ -83,7 +83,7 @@ if uploaded_file:
                 
                 TASK:
                 - Find 3 text strings visible in the video.
-                - Find 3 timestamps for photos.
+                - Find 3 timestamps for optimal ebay listing photos.
                 
                 Output JSON:
                 {{
@@ -118,8 +118,8 @@ if uploaded_file:
                 
                 STRATEGY:
                 - Use the Hint to identify the exact value.
-                - Use the Condition to adjust down.
-                - Give a realistic List Price for a quick sale.
+                - Use the Condition to adjust price.
+                - Give a realistic fair Ebay Listing Price.
                 
                 Output JSON:
                 {{
