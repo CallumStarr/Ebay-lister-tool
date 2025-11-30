@@ -14,7 +14,7 @@ else:
     st.error("Missing API Key.")
     st.stop()
 
-st.set_page_config(page_title="eBay Video Lister", page_icon="🎥")
+st.set_page_config(page_title="eBay Auto-Lister", page_subtitle= "test" , page_icon="🎥")
 
 # --- HELPER: FRAME HUNTER ---
 def get_burst_frames(video_path, timestamp_str):
@@ -46,7 +46,7 @@ with st.sidebar:
     currency_code = st.selectbox("Currency", ["£", "$", "€", "¥"])
     st.caption("Mode: Hybrid (Guide + Create)")
 
-st.title("🎥 eBay Video Auto-Lister")
+st.title("🎥 eBay Auto-Lister")
 
 # --- INPUT ---
 product_hint = st.text_input("Product Name/Code (Optional - e.g. 'SKX007J')")
