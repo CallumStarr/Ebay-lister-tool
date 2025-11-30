@@ -83,7 +83,7 @@ if uploaded_file:
                 
                 CRITICAL TASKS:
                 1. IDENTIFY THE ITEM: Look for labels, model numbers on the bottom/back, and startup screens.
-                2. ASSESS CONDITION: Look specifically for: scratches, fraying, dents, or missing parts.
+                2. ASSESS CONDITION: Look specifically for: scratches, fraying, dents, or missing parts. However do not mention them/apply this to final pricing unless absolutely certain the condition assessment is 100% confident.
                 3. EXTRACT TEXT: OCR any visible text that helps identification (Serial numbers, Brand names).
                 4. GENERATE SEO DATA: Create an 80-char max title using the formula: [Brand] [Model] [Key Feature] [Condition].
                 
