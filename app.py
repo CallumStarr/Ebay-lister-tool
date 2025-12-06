@@ -90,7 +90,7 @@ if uploaded_file:
                     time.sleep(1)
                     video_file = genai.get_file(video_file.name)
 
-                model = genai.GenerativeModel('gemini-pro-latest')
+                model = genai.GenerativeModel('gemini-3.0-pro-preview')
 
                 # --- STEP 1: THE DIRECTOR PROMPT (UPDATED) ---
                 # Key Change: Renamed "The Reveal" to "Macro Identifier" to force text/logo focus
